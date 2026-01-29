@@ -1,6 +1,8 @@
 use dma_api::*;
 
+// All tests in this file require the `alloc` feature
 #[test]
+#[cfg(feature = "alloc")]
 fn test_read() {
     init(&Impled);
 
@@ -14,6 +16,7 @@ fn test_read() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_write() {
     init(&Impled);
 
@@ -26,12 +29,14 @@ fn test_write() {
     assert_eq!(o, 1);
 }
 #[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)] // Used only in cfg(feature = "alloc") tests
 struct Foo {
     foo: u32,
     bar: u32,
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_modify() {
     init(&Impled);
     let mut dma: DBox<Foo> = DBox::zero(u64::MAX, Direction::Bidirectional).unwrap();
@@ -42,6 +47,7 @@ fn test_modify() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_deref() {
     init(&Impled);
     let mut dma: DVec<u32> = DVec::zeros(u64::MAX, 10, 0x1000, Direction::FromDevice).unwrap();
@@ -54,6 +60,7 @@ fn test_deref() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_copy() {
     init(&Impled);
     let mut dma: DVec<u32> = DVec::zeros(u64::MAX, 0x40, 0x1000, Direction::Bidirectional).unwrap();
@@ -72,6 +79,7 @@ fn test_copy() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_index() {
     init(&Impled);
     let dma: DVec<u32> = DVec::zeros(u64::MAX, 0x40, 0x1000, Direction::Bidirectional).unwrap();
@@ -117,6 +125,7 @@ fn test_slice_mut() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_from_vec() {
     init(&Impled);
     let value = vec![1, 2, 3];
@@ -134,20 +143,20 @@ fn test_from_vec() {
 struct Impled;
 
 impl Osal for Impled {
-    fn map(&self, addr: std::ptr::NonNull<u8>, size: usize, direction: Direction) -> u64 {
+    fn map(&self, addr: core::ptr::NonNull<u8>, size: usize, direction: Direction) -> u64 {
         println!("map @{:?}, size {size:#x}, {direction:?}", addr);
         addr.as_ptr() as usize as _
     }
 
-    fn unmap(&self, addr: std::ptr::NonNull<u8>, size: usize) {
+    fn unmap(&self, addr: core::ptr::NonNull<u8>, size: usize) {
         println!("unmap @{:?}, size {size:#x}", addr);
     }
 
-    fn flush(&self, addr: std::ptr::NonNull<u8>, size: usize) {
+    fn flush(&self, addr: core::ptr::NonNull<u8>, size: usize) {
         println!("flush @{:?}, size {size:#x}", addr);
     }
 
-    fn invalidate(&self, addr: std::ptr::NonNull<u8>, size: usize) {
+    fn invalidate(&self, addr: core::ptr::NonNull<u8>, size: usize) {
         println!("invalidate @{:?}, size {size:#x}", addr);
     }
 }
