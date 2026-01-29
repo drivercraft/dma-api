@@ -1,3 +1,27 @@
+//! DMA-compatible heap-allocated vector
+//!
+//! This module provides the `DVec<T>` type for allocating a DMA-compatible vector (contiguous memory array) on the heap.
+//! It automatically handles memory mapping, DMA mask checking, and cache coherence operations.
+//!
+//! # Example
+//!
+//! ```
+//! use dma_api::*;
+//!
+//! init(&NopOsal);
+//!
+//! // Create a zero-initialized DMA vector
+//! let mut dvec = DVec::zeros(u64::MAX, 10, 0x1000, Direction::ToDevice).unwrap();
+//! dvec.set(0, 42);
+//!
+//! // Read data
+//! let value = dvec.get(0).unwrap();
+//! assert_eq!(value, 42);
+//!
+//! // Convert to normal Vec
+//! let normal_vec = dvec.to_vec();
+//! ```
+
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::{alloc::Layout, mem::size_of, ops::Index};
@@ -5,6 +29,33 @@ use core::{alloc::Layout, mem::size_of, ops::Index};
 use super::DCommon;
 use crate::{dma::alloc::DError, Direction};
 
+/// DMA-compatible heap-allocated vector
+///
+/// This type allocates a contiguous element array on the heap and provides memory management
+/// functionality required for DMA transfers. It automatically handles virtual to physical
+/// address mapping, DMA mask checking, and cache coherence operations.
+///
+/// # Type Parameters
+///
+/// * `T` - Type of the vector elements
+///
+/// # Example
+///
+/// ```
+/// // Create a zero-initialized vector
+/// let mut dvec = DVec::zeros(u64::MAX, 10, 0x1000, Direction::ToDevice).unwrap();
+///
+/// // Set elements
+/// dvec.set(0, 1);
+/// dvec.set(1, 2);
+///
+/// // Read elements
+/// assert_eq!(dvec[0], 1);
+/// assert_eq!(dvec.get(0), Some(1));
+///
+/// // Get bus address
+/// let addr = dvec.bus_addr();
+/// ```
 pub struct DVec<T> {
     inner: DCommon<T>,
 }
@@ -12,6 +63,24 @@ pub struct DVec<T> {
 impl<T> DVec<T> {
     const T_SIZE: usize = size_of::<T>();
 
+    /// Create a zero-initialized DMA vector
+    ///
+    /// # Parameters
+    ///
+    /// * `dma_mask` - DMA mask, specifying the address range the device can access
+    /// * `len` - Number of vector elements
+    /// * `align` - Alignment in bytes, must be a power of 2
+    /// * `direction` - DMA transfer direction
+    ///
+    /// # Returns
+    ///
+    /// Returns the initialized `DVec`, or an error on failure
+    ///
+    /// # Errors
+    ///
+    /// * `DError::LayoutError` - Invalid layout parameter
+    /// * `DError::NoMemory` - Memory allocation failed
+    /// * `DError::DmaMaskNotMatch` - Allocated address exceeds DMA mask range
     pub fn zeros(
         dma_mask: u64,
         len: usize,
@@ -26,12 +95,33 @@ impl<T> DVec<T> {
         })
     }
 
+    /// Create a DMA vector from an existing Vec
+    ///
+    /// This method takes ownership of the Vec and converts it to a DMA-compatible vector.
+    ///
+    /// # Parameters
+    ///
+    /// * `dma_mask` - DMA mask, specifying the address range the device can access
+    /// * `value` - The Vec to convert
+    /// * `direction` - DMA transfer direction
+    ///
+    /// # Returns
+    ///
+    /// Returns the converted `DVec`, or an error on failure
     pub fn from_vec(dma_mask: u64, value: Vec<T>, direction: Direction) -> Result<Self, DError> {
         Ok(Self {
             inner: DCommon::from_vec(dma_mask, value, direction)?,
         })
     }
 
+    /// Convert the DMA vector to a normal Vec
+    ///
+    /// This method takes ownership of the DMA vector and converts it to a normal Rust Vec.
+    /// The read operation is automatically prepared and DMA mapping is released before conversion.
+    ///
+    /// # Returns
+    ///
+    /// Returns the converted normal Vec
     pub fn to_vec(mut self) -> Vec<T> {
         unsafe {
             self.inner
@@ -44,18 +134,35 @@ impl<T> DVec<T> {
         }
     }
 
+    /// Returns the number of elements in the vector
     pub fn len(&self) -> usize {
         self.inner.layout.size() / size_of::<T>()
     }
 
+    /// Checks if the vector is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the mapped bus address (physical address)
+    ///
+    /// This address can be directly passed to the DMA controller
     pub fn bus_addr(&self) -> u64 {
         self.inner.bus_addr
     }
 
+    /// Get the element at the specified index
+    ///
+    /// This method uses volatile read to ensure the latest data is fetched from memory,
+    /// and performs necessary cache invalidation operations according to the DMA direction.
+    ///
+    /// # Parameters
+    ///
+    /// * `index` - Element index
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(T)` if the index is valid, otherwise returns `None`
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len() {
             return None;
@@ -70,6 +177,19 @@ impl<T> DVec<T> {
         }
     }
 
+    /// Set the element at the specified index
+    ///
+    /// This method uses volatile write to ensure data is immediately written to memory,
+    /// and performs necessary cache flush operations according to the DMA direction.
+    ///
+    /// # Parameters
+    ///
+    /// * `index` - Element index
+    /// * `value` - The value to write
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds
     pub fn set(&mut self, index: usize, value: T) {
         assert!(
             index < self.len(),
@@ -91,20 +211,33 @@ impl<T> DVec<T> {
         unsafe { core::slice::from_raw_parts_mut(self.inner.addr.as_ptr(), self.len()) }
     }
 
+    /// Confirm write of the entire vector
+    ///
+    /// This method performs necessary cache flush operations on the entire vector.
     pub fn confirm_write_all(&self) {
         self.inner.confirm_write_all();
     }
 
+    /// Returns a raw pointer to the data
+    ///
+    /// Note: This pointer can be directly used for DMA operations, but direct use is not recommended.
     pub fn as_ptr(&self) -> *mut T {
         self.inner.addr.as_ptr()
     }
 
+    /// Prepare to read the entire vector
+    ///
+    /// This method performs necessary cache invalidation operations on the entire vector.
     pub fn prepare_read_all(&self) {
         self.inner
             .prepare_read(self.inner.addr.cast(), self.inner.layout.size());
     }
 }
 
+/// Supports accessing elements using the index operator `[]`
+///
+/// Note: This method returns a temporary reference that cannot be stored long-term.
+/// For long-term usage, use the `get()` method instead.
 impl<T> Index<usize> for DVec<T> {
     type Output = T;
 
@@ -119,6 +252,21 @@ impl<T> Index<usize> for DVec<T> {
     }
 }
 
+/// Copy data from a regular slice to the DMA vector
+///
+/// This method copies data from the source slice to the DMA vector and automatically flushes the cache.
+///
+/// # Type Parameters
+///
+/// * `T` - Element type, must implement the `Copy` trait
+///
+/// # Parameters
+///
+/// * `src` - Source slice
+///
+/// # Panics
+///
+/// Panics if the source slice length exceeds the DMA vector length
 impl<T: Copy> DVec<T> {
     pub fn copy_from_slice(&mut self, src: &[T]) {
         assert!(src.len() <= self.len());
@@ -129,6 +277,9 @@ impl<T: Copy> DVec<T> {
     }
 }
 
+/// Convert DVec to a Rust slice reference
+///
+/// Automatically prepares the read operation (cache invalidation) before conversion.
 impl<T> AsRef<[T]> for DVec<T> {
     fn as_ref(&self) -> &[T] {
         self.inner

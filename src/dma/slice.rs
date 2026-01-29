@@ -1,3 +1,31 @@
+//! DMA buffer slices
+//!
+//! This module provides two types of DMA buffer slices:
+//! - `DSlice<'a, T>`: Read-only DMA buffer slice
+//! - `DSliceMut<'a, T>`: Mutable DMA buffer slice
+//!
+//! These types automatically handle cache operations (flush/invalidate) required for DMA transfers
+//! and provide bus addresses for device use.
+//!
+//! # Examples
+//!
+//! ```
+//! use dma_api::*;
+//!
+//! // Initialize OSAL for doctest
+//! init(&NopOsal);
+//!
+//! // Read-only slice - for data transfer to device
+//! let data = [1u32, 2, 3, 4];
+//! let slice = DSlice::from(&data, Direction::ToDevice);
+//! assert_eq!(slice[0], 1);
+//!
+//! // Mutable slice - for receiving data from device
+//! let mut buffer = [0u32; 4];
+//! let mut slice_mut = DSliceMut::from(&mut buffer, Direction::FromDevice);
+//! slice_mut.prepare_read_all(); // Prepare for reading from device
+//! ```
+
 use core::{
     marker::PhantomData,
     mem::{size_of, size_of_val},
@@ -7,34 +35,92 @@ use core::{
 
 use crate::{flush, map, unmap, Direction};
 
+/// DMA read-only buffer slice
+///
+/// This type wraps an immutable slice `&'a [T]` and provides memory management functionality
+/// required for DMA transfers. It automatically handles virtual-to-physical address mapping
+/// and cache flush operations.
+///
+/// # Type Parameters
+///
+/// * `'a` - The lifetime of the slice, bound to the lifetime of underlying data
+/// * `T` - The type of slice elements, must be `Sized`
+///
+/// # Examples
+///
+/// ```
+/// use dma_api::*;
+///
+/// init(&NopOsal);
+///
+/// let data = [1u32, 2, 3, 4];
+/// let slice = DSlice::from(&data, Direction::ToDevice);
+///
+/// // Get bus address for device use
+/// let addr = slice.bus_addr();
+///
+/// // Access data
+/// assert_eq!(slice[0], 1);
+/// ```
 #[repr(transparent)]
 pub struct DSlice<'a, T> {
     inner: DSliceCommon<'a, T>,
 }
 
 impl<'a, T> DSlice<'a, T> {
+    /// Returns the number of elements in the slice
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Returns the mapped bus address (physical address)
+    ///
+    /// This address can be passed directly to DMA controller
     pub fn bus_addr(&self) -> u64 {
         self.inner.bus_addr
     }
 
+    /// Returns whether the slice is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Create a DMA read-only slice from a regular slice
+    ///
+    /// # Parameters
+    ///
+    /// * `value` - Source slice reference
+    /// * `direction` - DMA transfer direction
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dma_api::*;
+    ///
+    /// init(&NopOsal);
+    ///
+    /// let data = [1u32, 2, 3, 4];
+    /// let slice = DSlice::from(&data, Direction::ToDevice);
+    /// assert_eq!(slice[0], 1);
+    /// ```
     pub fn from(value: &'a [T], direction: Direction) -> Self {
         Self {
             inner: DSliceCommon::new(value, direction),
         }
     }
 
+    /// Prepare to read the entire slice
+    ///
+    /// For `FromDevice` or `Bidirectional` directions, this method invalidates cache
+    /// to ensure CPU can read latest data written by device.
     pub fn prepare_read_all(&self) {
         self.inner.prepare_read_all();
     }
 
+    /// Confirm writing of the entire slice
+    ///
+    /// For `ToDevice` or `Bidirectional` directions, this method flushes cache
+    /// to ensure data is written back to memory.
     pub fn confirm_write_all(&self) {
         self.inner.confirm_write_all();
     }
@@ -54,30 +140,98 @@ impl<T> AsRef<[T]> for DSlice<'_, T> {
     }
 }
 
+/// DMA mutable buffer slice
+///
+/// This type wraps a mutable slice `&'a mut [T]` and provides memory management
+/// functionality required for DMA transfers. In addition to read operations,
+/// it supports safe write operations and automatically handles cache coherence.
+///
+/// # Type Parameters
+///
+/// * `'a` - The lifetime of slice, bound to lifetime of underlying data
+/// * `T` - The type of slice elements, must be `Sized`
+///
+/// # Examples
+///
+/// ```
+/// use dma_api::*;
+///
+/// init(&NopOsal);
+///
+/// let mut buffer = [0u32; 4];
+/// let mut slice = DSliceMut::from(&mut buffer, Direction::Bidirectional);
+///
+/// // Write data (cache is automatically flushed)
+/// slice.set(0, 42);
+///
+/// // Read data
+/// let value = slice[0];
+/// assert_eq!(value, 42);
+/// ```
 #[repr(transparent)]
 pub struct DSliceMut<'a, T> {
     inner: DSliceCommon<'a, T>,
 }
 
 impl<'a, T> DSliceMut<'a, T> {
+    /// Create a DMA mutable slice from a regular mutable slice
+    ///
+    /// # Parameters
+    ///
+    /// * `value` - Source mutable slice reference
+    /// * `direction` - DMA transfer direction
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use dma_api::*;
+    ///
+    /// init(&NopOsal);
+    ///
+    /// let mut buffer = [0u32; 4];
+    /// let mut slice = DSliceMut::from(&mut buffer, Direction::ToDevice);
+    ///
+    /// slice.set(0, 42);
+    /// slice.confirm_write_all();
+    ///
+    /// assert_eq!(slice[0], 42);
+    /// ```
     pub fn from(value: &'a mut [T], direction: Direction) -> Self {
         Self {
             inner: DSliceCommon::new(value, direction),
         }
     }
 
+    /// Returns the mapped bus address (physical address)
+    ///
+    /// This address can be passed directly to DMA controller
     pub fn bus_addr(&self) -> u64 {
         self.inner.bus_addr
     }
 
+    /// Returns the number of elements in the slice
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Returns whether the slice is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Set the value at the specified index
+    ///
+    /// This method uses volatile write to ensure data is immediately written to memory,
+    /// and flushes cache based on DMA direction.
+    ///
+    /// # Parameters
+    ///
+    /// * `index` - Element index, must be within valid range
+    /// * `value` - The value to write
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of range
     pub fn set(&self, index: usize, value: T) {
         assert!(index < self.len());
 
@@ -92,10 +246,18 @@ impl<'a, T> DSliceMut<'a, T> {
         }
     }
 
+    /// Prepare to read the entire slice
+    ///
+    /// For `FromDevice` or `Bidirectional` directions, this method invalidates cache
+    /// to ensure CPU can read latest data written by device.
     pub fn prepare_read_all(&self) {
         self.inner.prepare_read_all();
     }
 
+    /// Confirm writing of the entire slice
+    ///
+    /// For `ToDevice` or `Bidirectional` directions, this method flushes cache
+    /// to ensure data is written back to memory.
     pub fn confirm_write_all(&self) {
         self.inner.confirm_write_all();
     }
@@ -155,22 +317,26 @@ impl<'a, T> DSliceCommon<'a, T> {
     }
 
     fn prepare_read_all(&self) {
-        self.direction
-            .prepare_read(self.addr.cast(), self.size * size_of::<T>());
+        self.direction.prepare_read(self.addr.cast(), self.size);
     }
 
     fn confirm_write_all(&self) {
-        self.direction
-            .confirm_write(self.addr.cast(), self.size * size_of::<T>());
+        self.direction.confirm_write(self.addr.cast(), self.size);
     }
 }
 
+/// 释放 DMA 映射
+///
+/// 当 `DSliceCommon` 被销毁时，自动解除虚拟地址到物理地址的映射。
 impl<T> Drop for DSliceCommon<'_, T> {
     fn drop(&mut self) {
         unmap(self.addr.cast(), self.size);
     }
 }
 
+/// 将 `DSliceCommon` 转换为 Rust 切片引用
+///
+/// 转换前会自动准备读取操作（无效化缓存）。
 impl<T> AsRef<[T]> for DSliceCommon<'_, T> {
     fn as_ref(&self) -> &[T] {
         self.prepare_read_all();
