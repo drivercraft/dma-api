@@ -231,3 +231,139 @@ fn alloc(dma_mask: u64, layout: core::alloc::Layout) -> *mut u8 {
 fn dealloc(ptr: *mut u8, layout: core::alloc::Layout) {
     unsafe { get_osal().dealloc(ptr, layout) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ptr::NonNull;
+
+    #[test]
+    fn test_direction_variants() {
+        let to_device = Direction::ToDevice;
+        let from_device = Direction::FromDevice;
+        let bidirectional = Direction::Bidirectional;
+
+        assert_eq!(to_device, Direction::ToDevice);
+        assert_eq!(from_device, Direction::FromDevice);
+        assert_eq!(bidirectional, Direction::Bidirectional);
+
+        assert_ne!(to_device, from_device);
+        assert_ne!(to_device, bidirectional);
+    }
+
+    #[test]
+    fn test_init_and_get_osal() {
+        // Initialize with NopOsal
+        init(&NopOsal);
+        assert!(INIT.load(core::sync::atomic::Ordering::Acquire));
+
+        // get_osal should not panic after initialization
+        let osal = get_osal();
+        let _ = osal;
+    }
+
+    #[test]
+    #[should_panic(expected = "dma-api not initialized")]
+    fn test_get_osal_panics_without_init() {
+        // Reset the init flag (this is a bit hacky but works for testing)
+        INIT.store(false, core::sync::atomic::Ordering::Release);
+
+        // This should panic
+        let _ = get_osal();
+    }
+
+    #[test]
+    fn test_map_unmap_with_noposal() {
+        init(&NopOsal);
+
+        let data = [1u8, 2, 3, 4];
+        let addr = NonNull::from(&data[0]).cast();
+
+        // Map should return the same address for NopOsal
+        let bus_addr = map(addr, 4, Direction::ToDevice);
+        assert_eq!(bus_addr, addr.as_ptr() as u64);
+
+        // Unmap should not panic
+        unmap(addr, 4);
+    }
+
+    #[test]
+    fn test_cache_operations_with_noposal() {
+        init(&NopOsal);
+
+        let data = [1u8, 2, 3, 4];
+        let addr = NonNull::from(&data[0]).cast();
+
+        // Flush and invalidate should not panic with NopOsal
+        flush(addr, 4);
+        invalidate(addr, 4);
+    }
+
+    #[test]
+    fn test_direction_prepare_read() {
+        let data = [1u8, 2, 3, 4];
+        let addr = NonNull::from(&data[0]).cast();
+
+        init(&NopOsal);
+
+        // ToDevice should not invalidate
+        Direction::ToDevice.prepare_read(addr, 4);
+
+        // FromDevice should invalidate
+        Direction::FromDevice.prepare_read(addr, 4);
+
+        // Bidirectional should invalidate
+        Direction::Bidirectional.prepare_read(addr, 4);
+    }
+
+    #[test]
+    fn test_direction_confirm_write() {
+        let data = [1u8, 2, 3, 4];
+        let addr = NonNull::from(&data[0]).cast();
+
+        init(&NopOsal);
+
+        // ToDevice should flush
+        Direction::ToDevice.confirm_write(addr, 4);
+
+        // FromDevice should not flush
+        Direction::FromDevice.confirm_write(addr, 4);
+
+        // Bidirectional should flush
+        Direction::Bidirectional.confirm_write(addr, 4);
+    }
+
+    #[test]
+    fn test_noposal_implementation() {
+        let osal = NopOsal;
+        let data = [1u8, 2, 3, 4];
+        let addr = NonNull::from(&data[0]).cast();
+
+        // Test map - should return identity mapping
+        let bus_addr = osal.map(addr, 4, Direction::ToDevice);
+        assert_eq!(bus_addr, addr.as_ptr() as u64);
+
+        // Test unmap - should not panic
+        osal.unmap(addr, 4);
+
+        // Test flush - should not panic
+        osal.flush(addr, 4);
+
+        // Test invalidate - should not panic
+        osal.invalidate(addr, 4);
+    }
+
+    #[test]
+    fn test_init_idempotency() {
+        init(&NopOsal);
+        let _first_osal = get_osal();
+
+        // Initialize again with same OSAL
+        init(&NopOsal);
+        let _second_osal = get_osal();
+
+        // Both should point to same OSAL instance
+        // (Note: this is an implementation detail, but important for safety)
+        assert!(INIT.load(core::sync::atomic::Ordering::Acquire));
+    }
+}

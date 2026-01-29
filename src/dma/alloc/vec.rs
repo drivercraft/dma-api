@@ -287,3 +287,174 @@ impl<T> AsRef<[T]> for DVec<T> {
         unsafe { core::slice::from_raw_parts(self.inner.addr.as_ptr(), self.len()) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{init, Direction, NopOsal};
+
+    #[test]
+    fn test_dvec_zeros() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::ToDevice).unwrap();
+
+        assert_eq!(dvec.len(), 10);
+        assert!(!dvec.is_empty());
+        assert!(dvec.bus_addr() != 0);
+    }
+
+    #[test]
+    fn test_dvec_from_vec() {
+        init(&NopOsal);
+
+        let vec = vec![1u32, 2, 3, 4, 5];
+        let dvec = DVec::from_vec(u64::MAX, vec, Direction::Bidirectional).unwrap();
+
+        assert_eq!(dvec.len(), 5);
+        assert!(!dvec.is_empty());
+    }
+
+    #[test]
+    fn test_dvec_to_vec() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 5, 4, Direction::Bidirectional).unwrap();
+        dvec.set(0, 10);
+        dvec.set(1, 20);
+        dvec.set(2, 30);
+
+        let vec = dvec.to_vec();
+
+        assert_eq!(vec.len(), 5);
+        assert_eq!(vec[0], 10);
+        assert_eq!(vec[1], 20);
+        assert_eq!(vec[2], 30);
+    }
+
+    #[test]
+    fn test_dvec_get_and_set() {
+        init(&NopOsal);
+
+        let mut dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::Bidirectional).unwrap();
+
+        dvec.set(0, 42);
+        dvec.set(5, 100);
+
+        assert_eq!(dvec.get(0), Some(42));
+        assert_eq!(dvec.get(5), Some(100));
+        assert_eq!(dvec.get(10), None);
+    }
+
+    #[test]
+    fn test_dvec_index_access() {
+        init(&NopOsal);
+
+        let mut dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::Bidirectional).unwrap();
+
+        dvec.set(0, 1);
+        dvec.set(1, 2);
+        dvec.set(2, 3);
+
+        assert_eq!(dvec[0], 1);
+        assert_eq!(dvec[1], 2);
+        assert_eq!(dvec[2], 3);
+    }
+
+    #[test]
+    fn test_dvec_empty() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 0, 4, Direction::Bidirectional).unwrap();
+
+        assert_eq!(dvec.len(), 0);
+        assert!(dvec.is_empty());
+    }
+
+    #[test]
+    fn test_dvec_prepare_read_all() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::FromDevice).unwrap();
+
+        // Should not panic
+        dvec.prepare_read_all();
+    }
+
+    #[test]
+    fn test_dvec_confirm_write_all() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::ToDevice).unwrap();
+
+        // Should not panic
+        dvec.confirm_write_all();
+    }
+
+    #[test]
+    fn test_dvec_as_ptr() {
+        init(&NopOsal);
+
+        let dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::Bidirectional).unwrap();
+
+        let ptr = dvec.as_ptr();
+
+        assert!(!ptr.is_null());
+    }
+
+    #[test]
+    fn test_dvec_copy_from_slice() {
+        init(&NopOsal);
+
+        let mut dvec = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::ToDevice).unwrap();
+
+        let src = [1u32, 2, 3, 4, 5];
+        dvec.copy_from_slice(&src);
+
+        assert_eq!(dvec[0], 1);
+        assert_eq!(dvec[1], 2);
+        assert_eq!(dvec[2], 3);
+        assert_eq!(dvec[3], 4);
+        assert_eq!(dvec[4], 5);
+    }
+
+    #[test]
+    fn test_dvec_as_ref() {
+        init(&NopOsal);
+
+        let mut dvec = DVec::<u32>::zeros(u64::MAX, 5, 4, Direction::Bidirectional).unwrap();
+
+        dvec.set(0, 10);
+        dvec.set(1, 20);
+        dvec.set(2, 30);
+
+        let slice: &[u32] = dvec.as_ref();
+
+        assert_eq!(slice.len(), 5);
+        assert_eq!(slice[0], 10);
+        assert_eq!(slice[1], 20);
+        assert_eq!(slice[2], 30);
+    }
+
+    #[test]
+    fn test_dvec_directions() {
+        init(&NopOsal);
+
+        let _to_device = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::ToDevice).unwrap();
+        let _from_device = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::FromDevice).unwrap();
+        let _bidirectional = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::Bidirectional).unwrap();
+
+        // All should work without panicking
+    }
+
+    #[test]
+    fn test_dvec_different_alignments() {
+        init(&NopOsal);
+
+        let _align4 = DVec::<u32>::zeros(u64::MAX, 10, 4, Direction::Bidirectional).unwrap();
+        let _align8 = DVec::<u32>::zeros(u64::MAX, 10, 8, Direction::Bidirectional).unwrap();
+        let _align16 = DVec::<u32>::zeros(u64::MAX, 10, 16, Direction::Bidirectional).unwrap();
+
+        // All should work without panicking
+    }
+}

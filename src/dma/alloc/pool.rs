@@ -231,3 +231,207 @@ impl DVecPool {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{init, Direction, NopOsal};
+
+    #[test]
+    fn test_dvecpool_creation() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 10);
+
+        // Pool should be created successfully
+    }
+
+    #[test]
+    fn test_dvecpool_alloc() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 2);
+        let mut buff1 = pool.alloc().unwrap();
+        let mut buff2 = pool.alloc().unwrap();
+
+        // Both buffers should work
+        buff1.set(0, 42);
+        buff2.set(0, 100);
+
+        assert_eq!(buff1[0], 42);
+        assert_eq!(buff2[0], 100);
+    }
+
+    #[test]
+    fn test_dbuff_deref() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 1);
+        let mut buff = pool.alloc().unwrap();
+
+        // Should be able to use DVec methods through Deref
+        assert_eq!(buff.len(), 4096);
+        assert!(!buff.is_empty());
+        assert!(buff.bus_addr() != 0);
+
+        buff.set(0, 10);
+        assert_eq!(buff[0], 10);
+    }
+
+    #[test]
+    fn test_dbuff_deref_mut() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 1);
+        let mut buff = pool.alloc().unwrap();
+
+        // Should be able to use mutable DVec methods through DerefMut
+        buff.set(0, 100);
+        buff.set(1, 200);
+
+        assert_eq!(buff[0], 100);
+        assert_eq!(buff[1], 200);
+    }
+
+    #[test]
+    fn test_dbuff_return_to_pool() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 1);
+
+        {
+            let buff = pool.alloc().unwrap();
+            buff.set(0, 42);
+        } // buff should be returned to pool here
+
+        // Should be able to allocate again (same buffer reused)
+        let buff2 = pool.alloc().unwrap();
+        buff2.set(0, 100);
+
+        assert_eq!(buff2[0], 100);
+    }
+
+    #[test]
+    fn test_dbuff_as_ref() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 1);
+        let buff = pool.alloc().unwrap();
+
+        let slice: &[u8] = buff.as_ref();
+
+        assert_eq!(slice.len(), 4096);
+    }
+
+    #[test]
+    fn test_dvecpool_multiple_allocs() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 5);
+
+        for i in 0..5 {
+            let mut buff = pool.alloc().unwrap();
+            buff.set(0, i as u8);
+            assert_eq!(buff[0], i as u8);
+        }
+
+        // 6th allocation should also work (creates new buffer)
+        let buff6 = pool.alloc().unwrap();
+        buff6.set(0, 99);
+        assert_eq!(buff6[0], 99);
+    }
+
+    #[test]
+    fn test_dvecpool_different_configs() {
+        init(&NopOsal);
+
+        let config1 = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::ToDevice,
+        };
+
+        let config2 = DVecConfig {
+            dma_mask: 0xFFFFFFFF,
+            align: 0x800,
+            size: 2048,
+            direction: Direction::FromDevice,
+        };
+
+        let pool1 = DVecPool::new_pool(config1, 2);
+        let pool2 = DVecPool::new_pool(config2, 2);
+
+        let buff1 = pool1.alloc().unwrap();
+        let buff2 = pool2.alloc().unwrap();
+
+        assert_eq!(buff1.len(), 4096);
+        assert_eq!(buff2.len(), 2048);
+    }
+
+    #[test]
+    fn test_dbuff_bus_addr() {
+        init(&NopOsal);
+
+        let config = DVecConfig {
+            dma_mask: u64::MAX,
+            align: 0x1000,
+            size: 4096,
+            direction: Direction::Bidirectional,
+        };
+
+        let pool = DVecPool::new_pool(config, 1);
+        let buff = pool.alloc().unwrap();
+
+        assert!(buff.bus_addr() != 0);
+    }
+}

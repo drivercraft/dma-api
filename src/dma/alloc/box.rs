@@ -180,3 +180,105 @@ impl<T> DBox<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{init, Direction, NopOsal};
+
+    #[test]
+    fn test_dbox_creation() {
+        init(&NopOsal);
+
+        let dbox = DBox::<u32>::zero(u64::MAX, Direction::ToDevice).unwrap();
+
+        // Should have valid bus address
+        assert!(dbox.bus_addr() != 0);
+    }
+
+    #[test]
+    fn test_dbox_write_and_read() {
+        init(&NopOsal);
+
+        let mut dbox = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+
+        dbox.write(42);
+        let value = dbox.read();
+
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn test_dbox_modify() {
+        init(&NopOsal);
+
+        let mut dbox = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+
+        dbox.write(10);
+        dbox.modify(|val| *val += 5);
+
+        assert_eq!(dbox.read(), 15);
+    }
+
+    #[test]
+    fn test_dbox_zero_with_align() {
+        init(&NopOsal);
+
+        let dbox = DBox::<u32>::zero_with_align(u64::MAX, Direction::ToDevice, 8).unwrap();
+
+        assert!(dbox.bus_addr() != 0);
+    }
+
+    #[test]
+    fn test_dbox_directions() {
+        init(&NopOsal);
+
+        let _to_device = DBox::<u32>::zero(u64::MAX, Direction::ToDevice).unwrap();
+        let _from_device = DBox::<u32>::zero(u64::MAX, Direction::FromDevice).unwrap();
+        let _bidirectional = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+
+        // All should work without panicking
+    }
+
+    #[test]
+    fn test_dbox_different_types() {
+        init(&NopOsal);
+
+        // Test with u8
+        let dbox_u8 = DBox::<u8>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+        dbox_u8.write(255);
+        assert_eq!(dbox_u8.read(), 255);
+
+        // Test with u32
+        let dbox_u32 = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+        dbox_u32.write(0xDEADBEEF);
+        assert_eq!(dbox_u32.read(), 0xDEADBEEF);
+
+        // Test with u64
+        let dbox_u64 = DBox::<u64>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+        dbox_u64.write(0x123456789ABCDEF0);
+        assert_eq!(dbox_u64.read(), 0x123456789ABCDEF0);
+    }
+
+    #[test]
+    fn test_dbox_zero_initialization() {
+        init(&NopOsal);
+
+        let dbox = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+
+        // Should be zero-initialized
+        assert_eq!(dbox.read(), 0);
+    }
+
+    #[test]
+    fn test_dbox_multiple_writes() {
+        init(&NopOsal);
+
+        let mut dbox = DBox::<u32>::zero(u64::MAX, Direction::Bidirectional).unwrap();
+
+        for i in 0..10 {
+            dbox.write(i);
+            assert_eq!(dbox.read(), i);
+        }
+    }
+}

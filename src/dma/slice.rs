@@ -343,3 +343,190 @@ impl<T> AsRef<[T]> for DSliceCommon<'_, T> {
         unsafe { core::slice::from_raw_parts_mut(self.addr.as_ptr(), self.len()) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::init;
+
+    #[test]
+    fn test_dslice_creation() {
+        init(&crate::NopOsal);
+
+        let data = [1u32, 2, 3, 4];
+        let slice = DSlice::from(&data, Direction::ToDevice);
+
+        assert_eq!(slice.len(), 4);
+        assert!(!slice.is_empty());
+        assert_eq!(slice.bus_addr(), data.as_ptr() as u64);
+    }
+
+    #[test]
+    fn test_dslice_access() {
+        init(&crate::NopOsal);
+
+        let data = [1u32, 2, 3, 4];
+        let slice = DSlice::from(&data, Direction::ToDevice);
+
+        assert_eq!(slice[0], 1);
+        assert_eq!(slice[1], 2);
+        assert_eq!(slice[2], 3);
+        assert_eq!(slice[3], 4);
+    }
+
+    #[test]
+    fn test_dslice_empty() {
+        init(&crate::NopOsal);
+
+        let data: [u32; 0] = [];
+        let slice = DSlice::from(&data, Direction::ToDevice);
+
+        assert_eq!(slice.len(), 0);
+        assert!(slice.is_empty());
+    }
+
+    #[test]
+    fn test_dslice_mut_creation() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [0u32; 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::FromDevice);
+
+        assert_eq!(slice.len(), 4);
+        assert!(!slice.is_empty());
+    }
+
+    #[test]
+    fn test_dslice_mut_set() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [0u32; 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::ToDevice);
+
+        slice.set(0, 42);
+        slice.set(1, 43);
+        slice.set(2, 44);
+        slice.set(3, 45);
+
+        assert_eq!(slice[0], 42);
+        assert_eq!(slice[1], 43);
+        assert_eq!(slice[2], 44);
+        assert_eq!(slice[3], 45);
+    }
+
+    #[test]
+    fn test_dslice_mut_get() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [1u32, 2, 3, 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::FromDevice);
+
+        // Use index access for valid indices
+        assert_eq!(slice[0], 1);
+        assert_eq!(slice[1], 2);
+        assert_eq!(slice[2], 3);
+        assert_eq!(slice[3], 4);
+    }
+
+    #[test]
+    fn test_dslice_mut_write_all() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [0u32; 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::ToDevice);
+
+        for i in 0..4 {
+            slice.set(i, (i * 10) as u32);
+        }
+
+        assert_eq!(slice[0], 0);
+        assert_eq!(slice[1], 10);
+        assert_eq!(slice[2], 20);
+        assert_eq!(slice[3], 30);
+    }
+
+    #[test]
+    fn test_dslice_as_ref() {
+        init(&crate::NopOsal);
+
+        let data = [1u32, 2, 3, 4];
+        let slice = DSlice::from(&data, Direction::ToDevice);
+
+        let slice_ref: &[u32] = slice.as_ref();
+
+        assert_eq!(slice_ref.len(), 4);
+        assert_eq!(slice_ref[0], 1);
+        assert_eq!(slice_ref[3], 4);
+    }
+
+    #[test]
+    fn test_dslice_mut_as_ref() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [1u32, 2, 3, 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::Bidirectional);
+
+        let slice_ref: &[u32] = slice.as_ref();
+
+        assert_eq!(slice_ref.len(), 4);
+        assert_eq!(slice_ref[0], 1);
+        assert_eq!(slice_ref[3], 4);
+    }
+
+    #[test]
+    fn test_dslice_directions() {
+        init(&crate::NopOsal);
+
+        let data = [1u32, 2, 3, 4];
+
+        // Test all directions
+        let _to_device = DSlice::from(&data, Direction::ToDevice);
+        let _from_device = DSlice::from(&data, Direction::FromDevice);
+        let _bidirectional = DSlice::from(&data, Direction::Bidirectional);
+
+        // All should work without panicking
+    }
+
+    #[test]
+    fn test_dslice_mut_directions() {
+        init(&crate::NopOsal);
+
+        // Test all directions with separate buffers
+        let mut buffer1 = [0u32; 4];
+        let _to_device = DSliceMut::from(&mut buffer1, Direction::ToDevice);
+
+        let mut buffer2 = [0u32; 4];
+        let _from_device = DSliceMut::from(&mut buffer2, Direction::FromDevice);
+
+        let mut buffer3 = [0u32; 4];
+        let _bidirectional = DSliceMut::from(&mut buffer3, Direction::Bidirectional);
+
+        // All should work without panicking
+    }
+
+    #[test]
+    fn test_dslice_mut_confirm_write_all() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [0u32; 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::ToDevice);
+
+        slice.set(0, 100);
+        slice.confirm_write_all();
+
+        assert_eq!(slice[0], 100);
+    }
+
+    #[test]
+    fn test_dslice_mut_prepare_read_all() {
+        init(&crate::NopOsal);
+
+        let mut buffer = [1u32, 2, 3, 4];
+        let slice = DSliceMut::from(&mut buffer, Direction::FromDevice);
+
+        slice.prepare_read_all();
+
+        // Should work without panicking
+        assert_eq!(slice[0], 1);
+    }
+}

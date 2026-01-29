@@ -222,3 +222,121 @@ impl<T> Drop for DCommon<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{init, Direction, NopOsal};
+
+    #[test]
+    fn test_derror_variants() {
+        let dma_mask_error = DError::DmaMaskNotMatch;
+        let no_memory_error = DError::NoMemory;
+        let layout_error = DError::LayoutError;
+
+        assert!(matches!(dma_mask_error, DError::DmaMaskNotMatch));
+        assert!(matches!(no_memory_error, DError::NoMemory));
+        assert!(matches!(layout_error, DError::LayoutError));
+    }
+
+    #[test]
+    fn test_dcommon_check_dma_mask() {
+        // Test with bus_addr that fits within mask
+        assert!(DCommon::<u32>::check_dma_mask(0xFFFFFFFFFFFF, 0x1000).is_ok());
+
+        // Test with bus_addr that exceeds mask
+        assert!(DCommon::<u32>::check_dma_mask(0xFFFF, 0x10000).is_err());
+    }
+
+    #[test]
+    fn test_dcommon_zeros() {
+        init(&NopOsal);
+
+        let layout = Layout::new::<[u32; 4]>();
+        let result = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice);
+
+        assert!(result.is_ok());
+        let common = result.unwrap();
+
+        // Check that the structure has valid values
+        assert_eq!(common.layout.size(), 16); // 4 * 4 bytes
+        assert!(common.addr.as_ptr() as usize != 0);
+        assert!(common.bus_addr != 0);
+    }
+
+    #[test]
+    fn test_dcommon_from_vec() {
+        init(&NopOsal);
+
+        let vec = vec![1u32, 2, 3, 4];
+        let result = DCommon::from_vec(u64::MAX, vec, Direction::Bidirectional);
+
+        assert!(result.is_ok());
+        let common = result.unwrap();
+
+        assert_eq!(common.layout.size(), 16); // 4 * 4 bytes
+        assert!(common.addr.as_ptr() as usize != 0);
+    }
+
+    #[test]
+    fn test_dcommon_prepare_read() {
+        init(&NopOsal);
+
+        let layout = Layout::new::<[u32; 4]>();
+        let common = DCommon::<u32>::zeros(u64::MAX, layout, Direction::FromDevice).unwrap();
+
+        // Should not panic with NopOsal
+        common.prepare_read(common.addr.cast(), 4);
+    }
+
+    #[test]
+    fn test_dcommon_confirm_write() {
+        init(&NopOsal);
+
+        let layout = Layout::new::<[u32; 4]>();
+        let common = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice).unwrap();
+
+        // Should not panic with NopOsal
+        common.confirm_write(common.addr.cast(), 4);
+    }
+
+    #[test]
+    fn test_dcommon_confirm_write_all() {
+        init(&NopOsal);
+
+        let layout = Layout::new::<[u32; 4]>();
+        let common = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice).unwrap();
+
+        // Should not panic with NopOsal
+        common.confirm_write_all();
+    }
+
+    #[test]
+    fn test_dcommon_direction_variants() {
+        init(&NopOsal);
+
+        let layout = Layout::new::<[u32; 4]>();
+
+        let _to_device = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice).unwrap();
+        let _from_device = DCommon::<u32>::zeros(u64::MAX, layout, Direction::FromDevice).unwrap();
+        let _bidirectional =
+            DCommon::<u32>::zeros(u64::MAX, layout, Direction::Bidirectional).unwrap();
+
+        // All should work without panicking
+    }
+
+    #[test]
+    fn test_dcommon_with_different_alignments() {
+        init(&NopOsal);
+
+        // Test with 4-byte alignment
+        let layout = Layout::from_size_align(16, 4).unwrap();
+        let result = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice);
+        assert!(result.is_ok());
+
+        // Test with 8-byte alignment
+        let layout = Layout::from_size_align(16, 8).unwrap();
+        let result = DCommon::<u32>::zeros(u64::MAX, layout, Direction::ToDevice);
+        assert!(result.is_ok());
+    }
+}
